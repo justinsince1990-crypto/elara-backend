@@ -1,0 +1,10 @@
+{
+  "name": "nexus-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'build ok'",
+    "start": "python main.py",
+    "dev": "python main.py"
+  }
+}

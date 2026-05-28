@@ -1,0 +1,39 @@
+kind = "mobile"
+previewPath = "/nexus-companion/"
+title = "Nexus Companion"
+version = "1.0.0"
+id = "artifacts/nexus-companion"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/health"
+name = "brain"
+paths = [ "/" ]
+localPort = 8001
+
+[services.development]
+run = "cd /home/runner/workspace && python main.py"
+
+[services.production]
+build = [ "echo", "build ok" ]
+run = [ "sh", "-c", "cd /home/runner/workspace && python main.py" ]
+
+[services.env]
+BRAIN_PORT = "8001"
+BRAIN_HOST = "0.0.0.0"
+
+[[services]]
+name = "expo"
+paths = [ "/nexus-companion/" ]
+localPort = 22436
+
+[services.development]
+run = "pnpm --filter @workspace/nexus-companion run dev"
+
+[services.env]
+PORT = "22436"
+BASE_PATH = "/nexus-companion/"

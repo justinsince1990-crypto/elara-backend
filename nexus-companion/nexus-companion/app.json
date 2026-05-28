@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "Nexus Companion",
+    "slug": "nexus-companion",
+    "owner": "trevorsdad2008",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "nexus-companion",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/images/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0E0418"
+    },
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {
+      "backgroundColor": "#0E0418",
+      "package": "com.trevorsdad2008.nexuscompanion",
+      "usesCleartextTraffic": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#0E0418"
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/images/icon.png",
+      "backgroundColor": "#0E0418"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-av",
+      "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Nexus Companion needs photo access to share images with Elara."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "9f89acff-0b23-430f-8fa6-234b7d33c8ad"
+      }
+    }
+  }
+}
