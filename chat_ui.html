@@ -2,10 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <title>Elara</title>
     <style>
-        /* Light Mode Defaults */
         :root {
             --bg: #f9fafb; --text: #111827; 
             --panel: rgba(255, 255, 255, 0.85);
@@ -13,7 +12,6 @@
             --elara-bg: #e5e7eb; --elara-text: #111827;
             --border: #e5e7eb; --accent: #059669;
         }
-        /* Dark Mode Override */
         @media (prefers-color-scheme: dark) {
             :root {
                 --bg: #0f0f0f; --text: #e5e5e5; 
@@ -25,13 +23,14 @@
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
-        body { background-color: var(--bg); color: var(--text); height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
         
-        /* Glassmorphism Header */
-        #header { padding: 14px 20px; background: var(--panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); z-index: 10; }
+        /* Force body to adapt to keyboard */
+        html, body { height: 100%; height: -webkit-fill-available; overflow: hidden; background-color: var(--bg); color: var(--text); }
+        body { display: flex; flex-direction: column; }
+        
+        #header { padding: 14px 20px; background: var(--panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); z-index: 10; flex-shrink: 0; }
         .header-title { font-weight: 700; font-size: 1.2rem; letter-spacing: 0.5px; }
         
-        /* Sleek Auto-Play Toggle */
         .toggle-container { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; font-weight: 600; color: #777; }
         .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
         .switch input { opacity: 0; width: 0; height: 0; }
@@ -40,7 +39,6 @@
         input:checked + .slider { background-color: var(--accent); }
         input:checked + .slider:before { transform: translateX(18px); }
 
-        /* Chat Area */
         #chat-box { flex: 1; overflow-y: auto; padding: 20px 16px; display: flex; flex-direction: column; gap: 18px; scroll-behavior: smooth; }
         .msg-row { display: flex; width: 100%; animation: fadeIn 0.3s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -51,12 +49,10 @@
         .user-msg { background-color: var(--user-bg); color: var(--user-text); border-bottom-right-radius: 4px; }
         .elara-msg { background-color: var(--elara-bg); color: var(--elara-text); border-bottom-left-radius: 4px; }
         
-        /* Manual Play Button */
-        .play-btn { display: inline-flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.1); border-radius: 50%; width: 28px; height: 28px; margin-left: 8px; cursor: pointer; text-decoration: none; vertical-align: middle; }
+        .play-btn { display: inline-flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.1); border-radius: 50%; width: 28px; height: 28px; margin-left: 8px; cursor: pointer; vertical-align: middle; }
         @media (prefers-color-scheme: dark) { .play-btn { background: rgba(255,255,255,0.15); } }
 
-        /* Glassmorphism Input Area */
-        #input-area { padding: 12px 16px; background: var(--panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); display: flex; gap: 10px; border-top: 1px solid var(--border); padding-bottom: calc(12px + env(safe-area-inset-bottom)); align-items: flex-end; z-index: 10; }
+        #input-area { padding: 12px 16px; background: var(--panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); display: flex; gap: 10px; border-top: 1px solid var(--border); padding-bottom: calc(12px + env(safe-area-inset-bottom)); align-items: flex-end; z-index: 10; flex-shrink: 0; }
         #prompt { flex: 1; padding: 12px 16px; border-radius: 20px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 1rem; resize: none; max-height: 120px; line-height: 1.4; outline: none; transition: border 0.2s; }
         #prompt:focus { border-color: var(--accent); }
         #send-btn { background: var(--accent); color: white; border-radius: 20px; padding: 12px 20px; height: 46px; cursor: pointer; border: none; font-weight: bold; transition: 0.2s; }
@@ -89,54 +85,58 @@
         const sendBtn = document.getElementById("send-btn");
         const autoplayToggle = document.getElementById("autoplay-toggle");
         
-        let messageCount = 0;
+        let localHistory = []; // We will maintain our own history array on the screen
 
-        // Init Settings
         autoplayToggle.checked = localStorage.getItem('elara_autoplay') === 'true';
         function saveSettings() { localStorage.setItem('elara_autoplay', autoplayToggle.checked); }
 
-        // Textarea Auto-resize
-        prompt.addEventListener('input', function() {
-            this.style.height = 'auto';
-            this.style.height = (this.scrollHeight < 120 ? this.scrollHeight : 120) + 'px';
-        });
-
-        // Simple Markdown Parser
         function formatText(text) {
             if (!text) return "";
             return text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>').replace(/\*(.*?)\*/g, '<i>$1</i>');
         }
 
-        async function load() {
-            try {
-                const res = await fetch("/history");
-                const data = await res.json();
-                const history = data.history || [];
-                
-                chatBox.innerHTML = history.map(m => `
-                    <div class="msg-row ${m.role}">
-                        <div class="msg-bubble ${m.role === 'user' ? 'user-msg' : 'elara-msg'}">
-                            ${formatText(m.content)}
-                            ${m.audio_url && m.audio_url !== 'undefined' ? `<div class="play-btn" onclick="play('${m.audio_url}')">▶</div>` : ''}
-                        </div>
+        function renderHistory() {
+            chatBox.innerHTML = localHistory.map(m => `
+                <div class="msg-row ${m.role}">
+                    <div class="msg-bubble ${m.role === 'user' ? 'user-msg' : 'elara-msg'}">
+                        ${formatText(m.content)}
+                        ${m.audio_url && m.audio_url !== 'undefined' ? `<div class="play-btn" onclick="play('${m.audio_url}')">▶</div>` : ''}
                     </div>
-                `).join("");
-                
-                chatBox.scrollTop = chatBox.scrollHeight;
-
-                // Auto-play trigger for new Elara messages
-                if (history.length > messageCount) {
-                    const lastMsg = history[history.length - 1];
-                    if (lastMsg.role !== 'user' && lastMsg.audio_url && autoplayToggle.checked) {
-                        play(lastMsg.audio_url);
-                    }
-                    messageCount = history.length;
-                }
-            } catch(e) { console.error("History fetch error", e); }
+                </div>
+            `).join("");
+            chatBox.scrollTop = chatBox.scrollHeight;
         }
 
         function play(url) {
             if (url && url !== 'undefined') new Audio(url).play();
+        }
+
+        async function fetchResponse(msg) {
+            try {
+                await fetch("/chat", {
+                    method: "POST", 
+                    headers: {"Content-Type": "application/json"}, 
+                    body: JSON.stringify({message: msg})
+                });
+                
+                // Fetch the newest message from the server to get Elara's response
+                const res = await fetch("/history");
+                const data = await res.json();
+                const serverHistory = data.history || [];
+                
+                if (serverHistory.length > 0) {
+                    const elaraResponse = serverHistory[serverHistory.length - 1];
+                    // Only add it if it's actually Elara's response
+                    if (elaraResponse.role === 'assistant') {
+                        localHistory.push(elaraResponse);
+                        renderHistory();
+                        
+                        if (elaraResponse.audio_url && autoplayToggle.checked) {
+                            play(elaraResponse.audio_url);
+                        }
+                    }
+                }
+            } catch (e) { console.error(e); }
         }
 
         sendBtn.onclick = async () => {
@@ -147,33 +147,49 @@
             sendBtn.disabled = true;
             sendBtn.innerText = "...";
             
-            // Optimistic UI update
-            chatBox.innerHTML += `<div class="msg-row user"><div class="msg-bubble user-msg">${formatText(msg)}</div></div>`;
-            chatBox.scrollTop = chatBox.scrollHeight;
-            messageCount++; 
+            // Push user message to our local screen instantly
+            localHistory.push({role: 'user', content: msg});
+            renderHistory();
 
-            try {
-                await fetch("/chat", {
-                    method: "POST", 
-                    headers: {"Content-Type": "application/json"}, 
-                    body: JSON.stringify({message: msg})
-                });
-            } catch (e) { console.error(e); }
+            await fetchResponse(msg);
             
             sendBtn.disabled = false;
             sendBtn.innerText = "Send";
-            load();
+            prompt.focus(); // Keep keyboard open after sending
         };
 
-        // Enter to send (Shift+Enter for new line)
+        // Handle Keyboard Pop-up Resizing
+        window.visualViewport.addEventListener('resize', () => {
+            document.body.style.height = window.visualViewport.height + 'px';
+            chatBox.scrollTop = chatBox.scrollHeight;
+        });
+
+        // Textarea Auto-resize
+        prompt.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight < 120 ? this.scrollHeight : 120) + 'px';
+            chatBox.scrollTop = chatBox.scrollHeight;
+        });
+
         prompt.addEventListener("keydown", function(e) {
             if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 sendBtn.click();
             }
         });
-
-        load();
+        
+        // Initial load to grab any existing history on refresh
+        async function initialLoad() {
+            try {
+                const res = await fetch("/history");
+                const data = await res.json();
+                if (data.history && data.history.length > 0) {
+                    localHistory = data.history;
+                    renderHistory();
+                }
+            } catch(e) {}
+        }
+        initialLoad();
     </script>
 </body>
 </html>
