@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Elara</title>
+    <style>
+        :root { --bg: #0f0f0f; --text: #e5e5e5; --panel: #1a1a1a; --user: #0b4d3c; --elara: #2a2a2a; --accent: #059669; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        body { background-color: var(--bg); color: var(--text); height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+        
+        #header { padding: 12px 16px; background: var(--panel); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+        .header-title { font-weight: bold; font-size: 1.1rem; letter-spacing: 1px; }
+        .btn-group { display: flex; gap: 8px; }
+        button { cursor: pointer; border: none; border-radius: 6px; padding: 10px 16px; font-weight: bold; background: var(--accent); color: white; transition: 0.2s; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .secondary-btn { background: #333; font-size: 12px; padding: 6px 10px; }
+        
+        #chat-box { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; scroll-behavior: smooth; }
+        .msg-row { display: flex; width: 100%; }
+        .msg-row.user { justify-content: flex-end; }
+        .msg-row.elara { justify-content: flex-start; }
+        
+        .msg-bubble { max-width: 85%; padding: 12px 16px; border-radius: 16px; line-height: 1.5; font-size: 0.95rem; word-wrap: break-word; }
+        .user-msg { background-color: var(--user); border-bottom-right-radius: 4px; }
+        .elara-msg { background-color: var(--elara); border-bottom-left-radius: 4px; }
+        
+        .playable { cursor: pointer; position: relative; }
+        .playable::after { content: ' 🎵'; font-size: 0.9em; opacity: 0.8; }
+        
+        #input-area { padding: 12px 16px; background: var(--panel); display: flex; gap: 10px; border-top: 1px solid #333; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+        #prompt { flex: 1; padding: 12px 16px; border-radius: 24px; border: 1px solid #444; background: var(--bg); color: white; font-size: 16px; }
+        #prompt:focus { outline: none; border-color: var(--accent); }
+        #send-btn { border-radius: 24px; padding: 0 20px; }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <div class="header-title">Elara</div>
+        <div class="btn-group">
+            <button id="sync-memory-btn" class="secondary-btn" onclick="triggerMemorySync()">🧠 Sync</button>
+            <button id="enable-push-btn" class="secondary-btn" onclick="initWebPush()">🔔 Push</button>
+        </div>
+    </div>
+
+    <main id="chat-box"></main>
+
+    <div id="input-area">
+        <input id="prompt" placeholder="Message Elara..." autocomplete="off">
+        <button id="send-btn">Send</button>
+    </div>
+
+    <script>
+        const chatBox = document.getElementById("chat-box");
+        
+        async function load() {
+            try {
+                const res = await fetch("/history");
+                const data = await res.json();
+                chatBox.innerHTML = (data.history || []).map(m => `
+                    <div class="msg-row ${m.role}">
+                        <div class="msg-bubble ${m.role === 'user' ? 'user-msg' : 'elara-msg'} ${m.audio_url ? 'playable' : ''}" 
+                             onclick="play('${m.audio_url || ''}')">
+                            ${m.content}
+                        </div>
+                    </div>
+                `).join("");
+                chatBox.scrollTop = chatBox.scrollHeight;
+            } catch(e) { console.error("History fetch error", e); }
+        }
+
+        async function play(url) {
+            if (url && url !== 'undefined') new Audio(url).play();
+        }
+
+        document.getElementById("send-btn").onclick = async () => {
+            const p = document.getElementById("prompt");
+            if(!p.value.trim()) return;
+            const msg = p.value;
+            p.value = "";
+            
+            chatBox.innerHTML += `<div class="msg-row user"><div class="msg-bubble user-msg">${msg}</div></div>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            await fetch("/chat", {
+                method: "POST", 
+                headers: {"Content-Type": "application/json"}, 
+                body: JSON.stringify({message: msg})
+            });
+            load();
+        };
+
+        document.getElementById("prompt").addEventListener("keypress", function(e) {
+            if (e.key === "Enter") document.getElementById("send-btn").click();
+        });
+
+        async function triggerMemorySync() {
+            const btn = document.getElementById('sync-memory-btn');
+            if (!btn) return;
+            btn.innerHTML = '⚙️ Reflecting...';
+            btn.disabled = true;
+            try {
+                const res = await fetch('/memory/consolidate', { method: 'POST' });
+                const data = await res.json();
+                btn.innerHTML = data.ok ? '✅ Synced' : '❌ Failed';
+            } catch (e) {
+                btn.innerHTML = '❌ Error';
+            }
+            setTimeout(() => { btn.innerHTML = '🧠 Sync'; btn.disabled = false; }, 3000);
+        }
+
+        function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) {
+                outputArray[i] = rawData.charCodeAt(i);
+            }
+            return outputArray;
+        }
+
+        async function initWebPush() {
+            const btn = document.getElementById('enable-push-btn');
+            if ('serviceWorker' in navigator && 'PushManager' in window) {
+                try {
+                    const reg = await navigator.serviceWorker.register('/service-worker.js');
+                    const permission = await Notification.requestPermission();
+                    if (permission === 'granted') {
+                        const pubKeyRes = await fetch('/push/public_key');
+                        const publicVapidKey = await pubKeyRes.text();
+                        const sub = await reg.pushManager.subscribe({
+                            userVisibleOnly: true,
+                            applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
+                        });
+                        await fetch('/push_token', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ token: JSON.stringify(sub) })
+                        });
+                        if (btn) btn.innerHTML = '🔔 Bound!';
+                        alert('Handshake Successful! Her backend has your device token.');
+                    } else {
+                        alert('Permission denied by browser.');
+                        if (btn) btn.innerHTML = '❌ Denied';
+                    }
+                } catch (err) {
+                    alert('Push Error: ' + err.message);
+                    if (btn) btn.innerHTML = '❌ Error';
+                }
+            } else {
+                alert('Web Push is not supported here.');
+                if (btn) btn.innerHTML = '❌ Unsupported';
+            }
+        }
+
+        load();
+    </script>
+</body>
+</html>
