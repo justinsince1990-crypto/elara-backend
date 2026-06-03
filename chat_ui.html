@@ -5,155 +5,173 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Elara</title>
     <style>
-        :root { --bg: #0f0f0f; --text: #e5e5e5; --panel: #1a1a1a; --user: #0b4d3c; --elara: #2a2a2a; --accent: #059669; }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        /* Light Mode Defaults */
+        :root {
+            --bg: #f9fafb; --text: #111827; 
+            --panel: rgba(255, 255, 255, 0.85);
+            --user-bg: #059669; --user-text: #ffffff;
+            --elara-bg: #e5e7eb; --elara-text: #111827;
+            --border: #e5e7eb; --accent: #059669;
+        }
+        /* Dark Mode Override */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0f0f0f; --text: #e5e5e5; 
+                --panel: rgba(26, 26, 26, 0.85);
+                --user-bg: #0b4d3c; --user-text: #ffffff;
+                --elara-bg: #2a2a2a; --elara-text: #e5e5e5;
+                --border: #333333;
+            }
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
         body { background-color: var(--bg); color: var(--text); height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
         
-        #header { padding: 12px 16px; background: var(--panel); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
-        .header-title { font-weight: bold; font-size: 1.1rem; letter-spacing: 1px; }
-        .btn-group { display: flex; gap: 8px; }
-        button { cursor: pointer; border: none; border-radius: 6px; padding: 10px 16px; font-weight: bold; background: var(--accent); color: white; transition: 0.2s; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-        .secondary-btn { background: #333; font-size: 12px; padding: 6px 10px; }
+        /* Glassmorphism Header */
+        #header { padding: 14px 20px; background: var(--panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); z-index: 10; }
+        .header-title { font-weight: 700; font-size: 1.2rem; letter-spacing: 0.5px; }
         
-        #chat-box { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; scroll-behavior: smooth; }
-        .msg-row { display: flex; width: 100%; }
+        /* Sleek Auto-Play Toggle */
+        .toggle-container { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; font-weight: 600; color: #777; }
+        .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .3s; border-radius: 22px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--accent); }
+        input:checked + .slider:before { transform: translateX(18px); }
+
+        /* Chat Area */
+        #chat-box { flex: 1; overflow-y: auto; padding: 20px 16px; display: flex; flex-direction: column; gap: 18px; scroll-behavior: smooth; }
+        .msg-row { display: flex; width: 100%; animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .msg-row.user { justify-content: flex-end; }
         .msg-row.elara { justify-content: flex-start; }
         
-        .msg-bubble { max-width: 85%; padding: 12px 16px; border-radius: 16px; line-height: 1.5; font-size: 0.95rem; word-wrap: break-word; }
-        .user-msg { background-color: var(--user); border-bottom-right-radius: 4px; }
-        .elara-msg { background-color: var(--elara); border-bottom-left-radius: 4px; }
+        .msg-bubble { max-width: 85%; padding: 12px 16px; border-radius: 18px; line-height: 1.5; font-size: 1rem; word-wrap: break-word; }
+        .user-msg { background-color: var(--user-bg); color: var(--user-text); border-bottom-right-radius: 4px; }
+        .elara-msg { background-color: var(--elara-bg); color: var(--elara-text); border-bottom-left-radius: 4px; }
         
-        .playable { cursor: pointer; position: relative; }
-        .playable::after { content: ' 🎵'; font-size: 0.9em; opacity: 0.8; }
-        
-        #input-area { padding: 12px 16px; background: var(--panel); display: flex; gap: 10px; border-top: 1px solid #333; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
-        #prompt { flex: 1; padding: 12px 16px; border-radius: 24px; border: 1px solid #444; background: var(--bg); color: white; font-size: 16px; }
-        #prompt:focus { outline: none; border-color: var(--accent); }
-        #send-btn { border-radius: 24px; padding: 0 20px; }
+        /* Manual Play Button */
+        .play-btn { display: inline-flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.1); border-radius: 50%; width: 28px; height: 28px; margin-left: 8px; cursor: pointer; text-decoration: none; vertical-align: middle; }
+        @media (prefers-color-scheme: dark) { .play-btn { background: rgba(255,255,255,0.15); } }
+
+        /* Glassmorphism Input Area */
+        #input-area { padding: 12px 16px; background: var(--panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); display: flex; gap: 10px; border-top: 1px solid var(--border); padding-bottom: calc(12px + env(safe-area-inset-bottom)); align-items: flex-end; z-index: 10; }
+        #prompt { flex: 1; padding: 12px 16px; border-radius: 20px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 1rem; resize: none; max-height: 120px; line-height: 1.4; outline: none; transition: border 0.2s; }
+        #prompt:focus { border-color: var(--accent); }
+        #send-btn { background: var(--accent); color: white; border-radius: 20px; padding: 12px 20px; height: 46px; cursor: pointer; border: none; font-weight: bold; transition: 0.2s; }
+        #send-btn:disabled { opacity: 0.6; cursor: not-allowed; }
     </style>
 </head>
 <body>
 
     <div id="header">
         <div class="header-title">Elara</div>
-        <div class="btn-group">
-            <button id="sync-memory-btn" class="secondary-btn" onclick="triggerMemorySync()">🧠 Sync</button>
-            <button id="enable-push-btn" class="secondary-btn" onclick="initWebPush()">🔔 Push</button>
+        <div class="toggle-container">
+            Voice
+            <label class="switch">
+                <input type="checkbox" id="autoplay-toggle" onchange="saveSettings()">
+                <span class="slider"></span>
+            </label>
         </div>
     </div>
 
     <main id="chat-box"></main>
 
     <div id="input-area">
-        <input id="prompt" placeholder="Message Elara..." autocomplete="off">
+        <textarea id="prompt" rows="1" placeholder="Message Elara..."></textarea>
         <button id="send-btn">Send</button>
     </div>
 
     <script>
         const chatBox = document.getElementById("chat-box");
+        const prompt = document.getElementById("prompt");
+        const sendBtn = document.getElementById("send-btn");
+        const autoplayToggle = document.getElementById("autoplay-toggle");
         
+        let messageCount = 0;
+
+        // Init Settings
+        autoplayToggle.checked = localStorage.getItem('elara_autoplay') === 'true';
+        function saveSettings() { localStorage.setItem('elara_autoplay', autoplayToggle.checked); }
+
+        // Textarea Auto-resize
+        prompt.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight < 120 ? this.scrollHeight : 120) + 'px';
+        });
+
+        // Simple Markdown Parser
+        function formatText(text) {
+            if (!text) return "";
+            return text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>').replace(/\*(.*?)\*/g, '<i>$1</i>');
+        }
+
         async function load() {
             try {
                 const res = await fetch("/history");
                 const data = await res.json();
-                chatBox.innerHTML = (data.history || []).map(m => `
+                const history = data.history || [];
+                
+                chatBox.innerHTML = history.map(m => `
                     <div class="msg-row ${m.role}">
-                        <div class="msg-bubble ${m.role === 'user' ? 'user-msg' : 'elara-msg'} ${m.audio_url ? 'playable' : ''}" 
-                             onclick="play('${m.audio_url || ''}')">
-                            ${m.content}
+                        <div class="msg-bubble ${m.role === 'user' ? 'user-msg' : 'elara-msg'}">
+                            ${formatText(m.content)}
+                            ${m.audio_url && m.audio_url !== 'undefined' ? `<div class="play-btn" onclick="play('${m.audio_url}')">▶</div>` : ''}
                         </div>
                     </div>
                 `).join("");
+                
                 chatBox.scrollTop = chatBox.scrollHeight;
+
+                // Auto-play trigger for new Elara messages
+                if (history.length > messageCount) {
+                    const lastMsg = history[history.length - 1];
+                    if (lastMsg.role !== 'user' && lastMsg.audio_url && autoplayToggle.checked) {
+                        play(lastMsg.audio_url);
+                    }
+                    messageCount = history.length;
+                }
             } catch(e) { console.error("History fetch error", e); }
         }
 
-        async function play(url) {
+        function play(url) {
             if (url && url !== 'undefined') new Audio(url).play();
         }
 
-        document.getElementById("send-btn").onclick = async () => {
-            const p = document.getElementById("prompt");
-            if(!p.value.trim()) return;
-            const msg = p.value;
-            p.value = "";
+        sendBtn.onclick = async () => {
+            if(!prompt.value.trim()) return;
+            const msg = prompt.value;
+            prompt.value = "";
+            prompt.style.height = 'auto';
+            sendBtn.disabled = true;
+            sendBtn.innerText = "...";
             
-            chatBox.innerHTML += `<div class="msg-row user"><div class="msg-bubble user-msg">${msg}</div></div>`;
+            // Optimistic UI update
+            chatBox.innerHTML += `<div class="msg-row user"><div class="msg-bubble user-msg">${formatText(msg)}</div></div>`;
             chatBox.scrollTop = chatBox.scrollHeight;
+            messageCount++; 
 
-            await fetch("/chat", {
-                method: "POST", 
-                headers: {"Content-Type": "application/json"}, 
-                body: JSON.stringify({message: msg})
-            });
+            try {
+                await fetch("/chat", {
+                    method: "POST", 
+                    headers: {"Content-Type": "application/json"}, 
+                    body: JSON.stringify({message: msg})
+                });
+            } catch (e) { console.error(e); }
+            
+            sendBtn.disabled = false;
+            sendBtn.innerText = "Send";
             load();
         };
 
-        document.getElementById("prompt").addEventListener("keypress", function(e) {
-            if (e.key === "Enter") document.getElementById("send-btn").click();
+        // Enter to send (Shift+Enter for new line)
+        prompt.addEventListener("keydown", function(e) {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendBtn.click();
+            }
         });
-
-        async function triggerMemorySync() {
-            const btn = document.getElementById('sync-memory-btn');
-            if (!btn) return;
-            btn.innerHTML = '⚙️ Reflecting...';
-            btn.disabled = true;
-            try {
-                const res = await fetch('/memory/consolidate', { method: 'POST' });
-                const data = await res.json();
-                btn.innerHTML = data.ok ? '✅ Synced' : '❌ Failed';
-            } catch (e) {
-                btn.innerHTML = '❌ Error';
-            }
-            setTimeout(() => { btn.innerHTML = '🧠 Sync'; btn.disabled = false; }, 3000);
-        }
-
-        function urlBase64ToUint8Array(base64String) {
-            const padding = '='.repeat((4 - base64String.length % 4) % 4);
-            const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
-            const rawData = window.atob(base64);
-            const outputArray = new Uint8Array(rawData.length);
-            for (let i = 0; i < rawData.length; ++i) {
-                outputArray[i] = rawData.charCodeAt(i);
-            }
-            return outputArray;
-        }
-
-        async function initWebPush() {
-            const btn = document.getElementById('enable-push-btn');
-            if ('serviceWorker' in navigator && 'PushManager' in window) {
-                try {
-                    const reg = await navigator.serviceWorker.register('/service-worker.js');
-                    const permission = await Notification.requestPermission();
-                    if (permission === 'granted') {
-                        const pubKeyRes = await fetch('/push/public_key');
-                        const publicVapidKey = await pubKeyRes.text();
-                        const sub = await reg.pushManager.subscribe({
-                            userVisibleOnly: true,
-                            applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
-                        });
-                        await fetch('/push_token', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ token: JSON.stringify(sub) })
-                        });
-                        if (btn) btn.innerHTML = '🔔 Bound!';
-                        alert('Handshake Successful! Her backend has your device token.');
-                    } else {
-                        alert('Permission denied by browser.');
-                        if (btn) btn.innerHTML = '❌ Denied';
-                    }
-                } catch (err) {
-                    alert('Push Error: ' + err.message);
-                    if (btn) btn.innerHTML = '❌ Error';
-                }
-            } else {
-                alert('Web Push is not supported here.');
-                if (btn) btn.innerHTML = '❌ Unsupported';
-            }
-        }
 
         load();
     </script>
