@@ -102,12 +102,7 @@ SEARCH_TOOL: dict[str, Any] = {
 }
 
 def _run_web_search(query: str) -> str:
-    """Execute real web search via httpx → DuckDuckGo lite HTML endpoint.
-
-    Returns normalized plain-text snippets. No LLM coupling; fully decoupled
-    from the model inference path so tool execution and generation remain
-    independent steps.
-    """
+    """Execute real web search via httpx → DuckDuckGo lite HTML endpoint."""
     if not query.strip():
         return "No query provided."
     try:
@@ -149,7 +144,7 @@ def _create_completion(stream: bool = False, **kwargs) -> Any:
     import pytz
     central = pytz.timezone('America/Chicago') # Lubbock Time
     current_time = datetime.datetime.now(central).strftime("%A, %B %d, %Y at %I:%M %p")
-    
+
     # Find the system prompt in the messages array and append the time
     for msg in kwargs.get('messages', []):
         if msg.get('role') == 'system':
@@ -212,13 +207,6 @@ _ONNX_MODEL_CACHE_DIR = os.path.expanduser("~/.cache/chroma/onnx_models/all-Mini
 _KEY_ONNX_CACHE = "elara/onnx_model_cache.tar.gz"
 
 def _restore_onnx_cache() -> None:
-    """Restore the ChromaDB ONNX embedding model from Object Storage.
-
-    On first deploy this does nothing (no cache yet).  On subsequent deploys
-    this restores the ~79 MB model in seconds instead of re-downloading it
-    from S3, making cold starts significantly faster.
-    Always sets _onnx_ready when done so callers can gate on model availability.
-    """
     try:
         if os.path.isdir(_ONNX_MODEL_CACHE_DIR):
             return
@@ -235,7 +223,6 @@ def _restore_onnx_cache() -> None:
         _onnx_ready.set()
 
 def _backup_onnx_cache() -> None:
-    """Upload the ONNX model to Object Storage so future deploys skip the S3 download."""
     if not os.path.isdir(_ONNX_MODEL_CACHE_DIR):
         return
     try:
@@ -245,7 +232,6 @@ def _backup_onnx_cache() -> None:
         logging.getLogger("brain").warning("onnx_cache_backup_failed: %s", e)
 
 def _early_restore_chroma() -> None:
-    """Synchronously restore ChromaDB snapshot before the client is initialized."""
     if not os.path.isdir(_CHROMA_DIR):
         try:
             parent = os.path.dirname(os.path.abspath(_CHROMA_DIR))
@@ -258,7 +244,6 @@ def _early_restore_chroma() -> None:
             logging.getLogger("brain").warning("chroma_early_restore_failed: %s", e)
 
 _early_restore_chroma()
-
 chroma_client = chromadb.PersistentClient(path=_CHROMA_DIR)
 embedding_func = embedding_functions.DefaultEmbeddingFunction()
 collection = chroma_client.get_or_create_collection(name="elara_memory", embedding_function=embedding_func)
@@ -277,7 +262,6 @@ _SELF_DEFAULT = {
     "self_model_last_run": "", "self_seq_at_last_synthesis": 0, "self_note_seq": 0,
 }
 
-# Object storage keys (remaining — _KEY_CHROMA_SNAPSHOT and _CHROMA_DIR defined earlier)
 _KEY_SELF = "elara/elara_self.json"
 _KEY_PINS = "elara/elara_pins.json"
 _KEY_TIMELINE = "elara/elara_timeline.json"
@@ -285,7 +269,6 @@ _KEY_MEMORY = "elara/memory.json"
 _KEY_CONSOLIDATION_META = "elara/consolidation_meta.json"
 _KEY_CONV_PREFIX = "elara/conversations/"
 
-# Map local filenames → object storage keys for the JSON files we persist
 _FILE_TO_KEY = {
     ELARA_SELF_FILE: _KEY_SELF,
     ELARA_PINS_FILE: _KEY_PINS,
@@ -294,7 +277,6 @@ _FILE_TO_KEY = {
     "consolidation_meta.json": _KEY_CONSOLIDATION_META,
 }
 
-# --- CORE UTILITIES ---
 def load_json(file, default):
     key = _FILE_TO_KEY.get(file)
     if key and objstore._GCS_AVAILABLE:
@@ -322,7 +304,6 @@ def save_json(file, data):
 def _normalize_text(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip())
 
-# --- ELARA SELF SYSTEM ---
 def load_elara_self() -> dict:
     data = load_json(ELARA_SELF_FILE, {})
     merged = {**_SELF_DEFAULT, **data}
@@ -489,7 +470,6 @@ def retrieve_episodic_memories(query: str, n: int = 6) -> list[str]:
         return []
 
 def save_learned_fact(fact_text: str) -> None:
-    """Auto-save a fact Elara learned via search — no user approval needed."""
     cleaned = _normalize_text(fact_text)
     if not cleaned or len(cleaned) < 5:
         return
@@ -514,7 +494,6 @@ def save_learned_fact(fact_text: str) -> None:
         logger.debug("save_learned_fact_failed: %s", e)
 
 def touch_last_seen() -> None:
-    """Record now as the last time Justin interacted."""
     try:
         data = load_elara_self()
         data["last_seen_ts"] = datetime.now(timezone.utc).isoformat()
@@ -530,7 +509,6 @@ def touch_last_seen() -> None:
         pass
 
 def save_pin(text: str) -> None:
-    """Save a thought Elara pins for Justin to find."""
     text = text.strip()
     if not text or len(text) < 3:
         return
@@ -546,7 +524,6 @@ def save_pin(text: str) -> None:
         logger.debug("save_pin_failed: %s", e)
 
 def save_moment(text: str, mood: str = "") -> None:
-    """Mark a significant moment in the shared timeline."""
     text = text.strip()
     if not text or len(text) < 5:
         return
@@ -558,23 +535,6 @@ def save_moment(text: str, mood: str = "") -> None:
         tl.append({"id": mid, "text": text[:300], "ts": datetime.now().isoformat(), "mood": mood[:60]})
         save_json(ELARA_TIMELINE_FILE, tl[-200:])
         logger.info("moment_saved: %s", text[:60])
-        if not _can_push_now():
-            logger.debug("save_moment: outside 8am-10pm push window, skipping push")
-            return
-        try:
-            if _load_scheduler_meta().get("notification_pending"):
-                logger.debug("save_moment: notification_pending, skipping push")
-                return
-        except Exception:
-            pass
-        sent = send_push("elara", text, full_message=text)
-        if sent:
-            try:
-                m = _load_scheduler_meta()
-                m["notification_pending"] = True
-                _save_scheduler_meta(m)
-            except Exception:
-                pass
     except Exception as e:
         logger.debug("save_moment_failed: %s", e)
 
@@ -589,7 +549,6 @@ def strip_internal_tags(text: str) -> str:
     return text.strip()
 
 def process_internal_tags(text: str) -> tuple[str, list[str]]:
-    """Strip all internal tags, apply self-updates & episodes, return cleaned text + memory suggestions."""
     suggestions = [
         m.strip()
         for m in re.findall(r"\[MEMORY_SUGGESTION:\s*(.*?)\]", text, re.DOTALL | re.IGNORECASE)
@@ -638,8 +597,6 @@ def process_internal_tags(text: str) -> tuple[str, list[str]]:
         pass
     for moment in moments:
         save_moment(moment, current_mood)
-    # Facts from [MEMORY_SUGGESTION] are already auto-saved above via save_learned_fact().
-    # Return empty list — no client-side approval step needed.
     cleaned = strip_internal_tags(text)
     return cleaned, []
 
@@ -652,7 +609,7 @@ def get_vitals():
 
 class ChatRequest(BaseModel):
     message: str = Field(default="", max_length=MAX_MESSAGE_CHARS)
-    image: Optional[str] = None  # base64 jpeg bytes (no data: prefix)
+    image: Optional[str] = None
     conversation_id: Optional[str] = None
 
 class ErrorBody(BaseModel):
@@ -668,7 +625,7 @@ def api_error(status_code: int, code: str, message: str, details: Any = None) ->
 
 _rate_buckets: dict[str, deque] = {}
 _rate_last_seen: dict[str, float] = {}
-_RATE_CLEANUP_INTERVAL = 300.0  # prune idle IPs every 5 minutes
+_RATE_CLEANUP_INTERVAL = 300.0
 _rate_last_cleanup = 0.0
 
 def check_rate_limit(ip: str) -> None:
@@ -676,7 +633,6 @@ def check_rate_limit(ip: str) -> None:
     now = time.time()
     window = 60.0
 
-    # Periodically remove IPs that haven't been seen in a while
     if now - _rate_last_cleanup > _RATE_CLEANUP_INTERVAL:
         stale = [k for k, v in _rate_last_seen.items() if now - v > _RATE_CLEANUP_INTERVAL]
         for k in stale:
@@ -713,9 +669,6 @@ def _new_conversation(title: str | None = None) -> dict[str, Any]:
         "messages": [],
     }
 
-
-
-
 def load_conversation(conversation_id: str) -> dict:
     import os, json
     path = f"/root/elara/conversations/{conversation_id}.json"
@@ -733,11 +686,6 @@ def save_conversation(conv: dict) -> None:
     os.makedirs("/root/elara/conversations", exist_ok=True)
     with open(path, "w") as f:
         json.dump(conv, f, indent=2)
-
-
-# ─── ASYNC WRAPPERS ───────────────────────────────────────────────────────────
-# All blocking I/O (GCS HTTP calls, ChromaDB) must use these in async endpoints.
-# Calling them directly freezes uvicorn's event loop and causes health timeouts.
 
 async def _io_get_conversation(conversation_id: Optional[str]) -> dict[str, Any]:
     return await asyncio.to_thread(get_or_create_conversation, conversation_id)
@@ -776,40 +724,23 @@ async def _io_save_episode(text: str) -> None:
     await asyncio.to_thread(save_episode, text)
 
 def get_or_create_conversation(conversation_id: Optional[str]) -> dict[str, Any]:
-    if conversation_id:
-        return load_conversation(conversation_id)
-    # Default conversation (back-compat)
-    default_id = "default"
-    data = objstore.load_blob(_conv_key(default_id), default=None)
-    if data is not None:
-        return data
-    conv = {
-        "id": default_id,
-        "title": "Default",
-        "created_at": datetime.now().isoformat(),
-        "updated_at": datetime.now().isoformat(),
-        "messages": [],
-    }
-    save_conversation(conv)
-    return conv
-
+    cid = conversation_id or "default"
+    try:
+        return load_conversation(cid)
+    except Exception:
+        conv = {
+            "id": cid,
+            "title": "Default",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+            "messages": [],
+        }
+        save_conversation(conv)
+        return conv
 @app.get("/", response_class=HTMLResponse)
 async def root():
     with open("/root/elara/chat_ui.html", "r") as f:
         return HTMLResponse(f.read(), headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"})
-
-@app.get("/service-worker.js")
-async def service_worker():
-    from fastapi import Response
-    with open("/root/elara/service-worker.js", "r") as f:
-        return Response(content=f.read(), media_type="application/javascript")
-
-@app.get("/push/public_key")
-async def get_public_key():
-    from fastapi import Response
-    with open("/root/elara/vapid_public.txt", "r") as f:
-        return Response(content=f.read(), media_type="text/plain")
-
 
 @app.get("/health")
 async def health():
@@ -1110,16 +1041,14 @@ async def delete_memory(req: MemoryDeleteRequest):
     return {"ok": True, "items": kept}
 
 def _recency_score(ts_str: str) -> float:
-    """Return a 0-1 score that decays with age. Today = 1.0, each day subtracts MEMORY_RECENCY_DECAY."""
     try:
         dt = datetime.fromisoformat(str(ts_str))
         days = max(0.0, (datetime.now() - dt.replace(tzinfo=None)).total_seconds() / 86400)
         return 1.0 / (1.0 + days * MEMORY_RECENCY_DECAY)
     except Exception:
-        return 0.5  # unknown age → neutral
+        return 0.5
 
 def _rank_by_recency_and_relevance(docs: list[str], dists: list[float], metas: list[dict], ts_key: str) -> list[str]:
-    """Re-rank candidates by combined semantic relevance + recency, apply distance filter."""
     scored: list[tuple[float, str]] = []
     rel_weight = 1.0 - MEMORY_RECENCY_WEIGHT
     for doc, dist, meta in zip(docs, dists, metas):
@@ -1156,15 +1085,12 @@ def retrieve_relevant_memories(query: str) -> list[str]:
         return []
 
 def build_memory_context(user_msg: str) -> str:
-    # Only query ChromaDB once both ONNX model and startup memory sync are done.
-    # Avoids: (a) CDN download stall, (b) read/write contention during index rebuild.
     memory_available = _memory_ready.is_set()
     facts = retrieve_relevant_memories(user_msg)[:MEMORY_CONTEXT_MAX_ITEMS] if memory_available else []
     episodes = retrieve_episodic_memories(user_msg, n=6) if memory_available else []
     latest_episode = _get_latest_episode() if memory_available else None
     self_data = load_elara_self()
 
-    # Total counts — shown to Elara so she knows the scope of her actual memory
     all_items = load_memory_items()
     total_facts = len(all_items)
     try:
@@ -1174,13 +1100,11 @@ def build_memory_context(user_msg: str) -> str:
 
     sections: list[str] = []
 
-    # Current date/time — always first (Justin's local timezone: US Central)
     _justin_tz = ZoneInfo("America/Chicago")
     now_local = datetime.now(_justin_tz)
     now_str = now_local.strftime("%A, %B %-d, %Y — %-I:%M %p %Z")
     sections.append(f"[Right now: {now_str}]")
 
-    # Memory boundary — shows Elara the exact scope of her memory
     if total_facts == 0 and total_episodes == 0:
         sections.append(
             "[Memory: you have no stored facts or episodes about Justin yet. "
@@ -1194,11 +1118,9 @@ def build_memory_context(user_msg: str) -> str:
             f"Do not reference conversations or details that are not listed below — if it is not shown, you do not have it.]"
         )
 
-    # Self-profile always comes first
     self_block = format_self_for_prompt(self_data)
     sections.append(self_block)
 
-    # Long-term facts
     compact_facts: list[str] = []
     char_count = 0
     for m in facts:
@@ -1214,7 +1136,6 @@ def build_memory_context(user_msg: str) -> str:
     if compact_facts:
         sections.append("[What I know — long-term facts]\n" + "\n".join(f"- {x}" for x in compact_facts))
 
-    # Episodic memories — always include latest episode first, then relevant ones
     compact_eps: list[str] = []
     seen_eps: set[str] = set()
     ep_chars = 0
@@ -1244,10 +1165,7 @@ def build_memory_context(user_msg: str) -> str:
 
     return "\n\n".join(sections) if sections else ""
 
-# ─── HISTORY COMPRESSION ────────────────────────────────────────────────────
-
 def build_api_history(conv: dict) -> list[dict]:
-    """Return history messages for the API: summary system msg + last N verbatim."""
     messages = conv.get("messages") or []
     summary = (conv.get("summary") or "").strip()
     result: list[dict] = []
@@ -1259,7 +1177,6 @@ def build_api_history(conv: dict) -> list[dict]:
     return result
 
 def _generate_and_store_summary(conv_id: str) -> None:
-    """Background thread: summarize older messages and store in conversation."""
     import threading
     try:
         conv = load_conversation(conv_id)
@@ -1267,7 +1184,6 @@ def _generate_and_store_summary(conv_id: str) -> None:
         if len(messages) <= HISTORY_KEEP_VERBATIM:
             return
         older = messages[:-HISTORY_KEEP_VERBATIM]
-        # Only resummary if we have uncovered messages
         covered_through = conv.get("summary_covers_through", 0)
         if len(older) <= covered_through:
             return
@@ -1294,25 +1210,7 @@ def _generate_and_store_summary(conv_id: str) -> None:
             user_msg = text
         resp = _create_completion(stream=False,
             model=_active_model,
-            messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": user_msg}],
-            temperature=0.3,
-            max_tokens=220,
-        )
-        summary = resp.choices[0].message.content.strip()
-        conv["summary"] = summary
-        conv["summary_updated_at"] = datetime.now().isoformat()
-        conv["summary_covers_through"] = len(older)
-        save_conversation(conv)
-        logger.info("summary_updated conv=%s covers=%d", conv_id, len(older))
-    except Exception as e:
-        logger.debug("summary_generation_failed conv=%s: %s", conv_id, e)
-
-def maybe_update_summary(conv_id: str, msg_count: int) -> None:
-    if msg_count < HISTORY_COMPRESS_THRESHOLD:
-        return
-    import threading
-    threading.Thread(target=_generate_and_store_summary, args=(conv_id,), daemon=True, name="summary").start()
-
+            messages=[{"role": "system", "content": system_msg
 # ─── CONSOLIDATION ENGINE ────────────────────────────────────────────────────
 
 _CONSOLIDATION_META = "consolidation_meta.json"
@@ -1342,7 +1240,6 @@ def should_consolidate() -> bool:
     return True
 
 def run_consolidation() -> None:
-    """Synthesize episodic memories into patterns, update self-profile, prune old episodes."""
     try:
         results = episodic_collection.get(include=["documents", "metadatas"])
         docs = results.get("documents") or []
@@ -1391,7 +1288,6 @@ def run_consolidation() -> None:
         if working:
             self_data["working_through"] = working
         save_elara_self(self_data)
-        # Prune — keep the 6 most recent episodes, delete the rest
         keep_n = 6
         if len(ids) > keep_n:
             to_delete = ids[:-keep_n]
@@ -1509,705 +1405,4 @@ async def chat_endpoint(req: Request):
         conv = await _io_get_conversation(parsed.conversation_id)
         touch_last_seen()
         history = conv.get("messages") or []
-        context_block = await asyncio.to_thread(build_memory_context, user_msg)
-        if INCLUDE_VITALS_CONTEXT:
-            vitals = get_vitals()
-            context_block += f"\n[Vitals] CPU {vitals['cpu']} RAM {vitals['ram']} Disk {vitals['disk']}"
-
-        api_messages = [{"role": "system", "content": (full_system_prompt + ("\n\n" + context_block if context_block else ""))}]
-        for msg in build_api_history(conv):
-            api_messages.append(msg)
-        api_messages.append({"role": "system", "content": "Reminder: no asterisks, no stage directions, no narration. One question max. No hollow affirmations. No narrating back. Capitalize sentences and 'I' — do NOT write in all lowercase. Bring your own perspective — don't just ask and react. Tag every real fact Justin shares about himself with [MEMORY_SUGGESTION:]. Tags at the very end only."})
-
-        user_content = [{"type": "text", "text": user_msg}]
-        if req_image:
-            user_content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{req_image}"}})
-        api_messages.append({"role": "user", "content": user_content})
-
-        if not GROK_API_KEY:
-            return api_error(500, "missing_api_key", "Missing GROK_API_KEY")
-
-        working_msgs = list(api_messages)
-        raw_reply = ""
-        for _round in range(4):
-            response = _create_completion(
-                stream=False,
-                model=_active_model,
-                messages=working_msgs,
-                tools=[SEARCH_TOOL],
-                tool_choice="auto",
-                temperature=0.95,
-                max_tokens=1200,
-            )
-            msg = response.choices[0].message
-            finish = response.choices[0].finish_reason
-            if finish == "tool_calls" and msg.tool_calls:
-                working_msgs.append({"role": "assistant", "content": msg.content or None, "tool_calls": [
-                    {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                    for tc in msg.tool_calls
-                ]})
-                for tc in msg.tool_calls:
-                    if tc.function.name == "search_web":
-                        try:
-                            args = json.loads(tc.function.arguments)
-                            query = args.get("query", "")
-                        except Exception:
-                            query = ""
-                        logger.info("search_web (non-stream) query=%r", query)
-                        result = _run_web_search(query)
-                        working_msgs.append({"role": "tool", "tool_call_id": tc.id, "content": result})
-            else:
-                raw_reply = (msg.content or "").strip()
-                break
-
-        reply, suggestions = process_internal_tags(raw_reply)
-        reply = re.sub(r"\[ELARA'S CURRENT STATE.*?\]", "", reply, flags=re.DOTALL | re.IGNORECASE).strip()
-        reply = re.sub(r"\[What I know.*?\]", "", reply, flags=re.DOTALL | re.IGNORECASE).strip()
-        reply = re.sub(r"\[Recent episodes.*?\]", "", reply, flags=re.DOTALL | re.IGNORECASE).strip()
-        reply = re.sub(r"\[.*Context.*?\]", "", reply, flags=re.DOTALL | re.IGNORECASE).strip()
-
-        history.append({"role": "user", "content": user_msg, "ts": datetime.now(timezone.utc).isoformat()})
-        history.append({"role": "assistant", "content": reply, "ts": datetime.now(timezone.utc).isoformat()})
-        conv["messages"] = history[-200:]
-        await _io_save_conversation(conv)
-        maybe_update_summary(conv["id"], len(conv["messages"]))
-        maybe_consolidate()
-        maybe_synthesize_self()
-        maybe_auto_title(conv["id"], len(conv["messages"]), conv.get("title", "New chat"))
-
-        # INJECT: Auto-TTS for Chat
-        audio_url = None
-        try:
-            tts_req = TTSRequest(text=reply)
-            tts_resp = await generate_tts(tts_req)
-            import json
-            audio_url = json.loads(tts_resp.body.decode('utf-8')).get('url')
-        except Exception as e:
-            print(f'Auto-TTS failed: {e}')
-
-        return {
-            "audio": audio_url,
-            "ok": True,
-            "response": reply,
-            "thought": "",
-            "model": _active_model,
-            "conversation_id": conv["id"],
-            "memory_suggestions": suggestions,
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("chat_endpoint failed: %s", e)
-        return api_error(500, "internal_error", "Something glitched on my end.")
-
-# ─── STREAMING TAG FILTER ───────────────────────────────────────────────────
-
-class StreamTagFilter:
-    """Real-time character-level filter that silently drops internal tags during SSE streaming."""
-    INTERNAL_PREFIXES = (
-        "SELF_UPDATE:", "SELF_NOTE:", "EPISODE:", "MEMORY_SUGGESTION:", "LEARNED:", "REFLECT:",
-        "ELARA'S CURRENT STATE", "WHAT I KNOW", "RECENT EPISODES", "BREAK",
-        "PIN:", "MOMENT:",
-    )
-    MAX_BUF = 350  # safety valve — flush as plain text if a tag grows this long
-
-    def __init__(self) -> None:
-        self._buf = ""
-        self._in_tag = False
-
-    def feed(self, token: str) -> str:
-        """Feed a raw token; return only text safe to show the user."""
-        out: list[str] = []
-        for ch in token:
-            if self._in_tag:
-                self._buf += ch
-                if ch == "]":
-                    inner = self._buf[1:-1]
-                    is_internal = any(inner.upper().startswith(p.upper()) for p in self.INTERNAL_PREFIXES)
-                    if not is_internal:
-                        out.append(self._buf)
-                    self._buf = ""
-                    self._in_tag = False
-                elif len(self._buf) > self.MAX_BUF:
-                    out.append(self._buf)
-                    self._buf = ""
-                    self._in_tag = False
-            else:
-                if ch == "[":
-                    self._in_tag = True
-                    self._buf = "["
-                else:
-                    out.append(ch)
-        return "".join(out)
-
-    def flush(self) -> str:
-        """Discard any incomplete/unclosed tag at end of stream."""
-        self._buf = ""
-        self._in_tag = False
-        return ""
-
-# ─── AUTO-TITLE ──────────────────────────────────────────────────────────────
-
-def _auto_title_conversation(conv_id: str) -> None:
-    """Background: generate an evocative title once a conversation has 4+ messages."""
-    try:
-        conv = load_conversation(conv_id)
-        if (conv.get("title") or "New chat") != "New chat":
-            return
-        messages = conv.get("messages") or []
-        if len(messages) < 4:
-            return
-        sample = "\n".join(
-            f"{'Justin' if m.get('role') == 'user' else 'Elara'}: {(m.get('content') or '')[:200]}"
-            for m in messages[:6]
-        )
-        resp = _create_completion(
-            stream=False,
-            model=_active_model,
-            messages=[
-                {"role": "system", "content": "Generate a short, evocative title (3-6 words) for this conversation between Justin and Elara. Capture the emotional texture, not just the topic. No quotes, no punctuation at the end. Just the title."},
-                {"role": "user", "content": sample},
-            ],
-            temperature=0.6,
-            max_tokens=16,
-        )
-        title = resp.choices[0].message.content.strip().strip('"\'').strip()
-        if title:
-            conv["title"] = title[:80]
-            save_conversation(conv)
-            logger.info("auto_titled conv=%s title=%s", conv_id, title)
-    except Exception as e:
-        logger.debug("auto_title_failed conv=%s: %s", conv_id, e)
-
-def maybe_auto_title(conv_id: str, msg_count: int, current_title: str) -> None:
-    if current_title != "New chat" or msg_count < 4:
-        return
-    import threading
-    threading.Thread(target=_auto_title_conversation, args=(conv_id,), daemon=True, name="auto-title").start()
-
-@app.post("/chat/stream")
-async def chat_stream_endpoint(req: Request):
-    ip = (req.client.host if req.client else "unknown")
-    check_rate_limit(ip)
-
-    try:
-        data = await req.json()
-        parsed = ChatRequest(**data)
-        user_msg = parsed.message or ""
-        req_image = parsed.image
-    except Exception as e:
-        logger.warning("bad_request: %s", e)
-        return api_error(400, "bad_request", "Invalid request body")
-
-    if req_image and len(req_image) > MAX_IMAGE_B64_CHARS:
-        return api_error(413, "payload_too_large", "Image too large")
-
-    if not GROK_API_KEY:
-        return api_error(500, "missing_api_key", "Missing GROK_API_KEY")
-
-    conv = await _io_get_conversation(parsed.conversation_id)
-    touch_last_seen()
-    history = conv.get("messages") or []
-    context_block = await asyncio.to_thread(build_memory_context, user_msg)
-    if INCLUDE_VITALS_CONTEXT:
-        vitals = get_vitals()
-        context_block += f"\n[Vitals] CPU {vitals['cpu']} RAM {vitals['ram']} Disk {vitals['disk']}"
-    api_messages = [{"role": "system", "content": (full_system_prompt + ("\n\n" + context_block if context_block else ""))}]
-    for msg in build_api_history(conv):
-        api_messages.append(msg)
-    api_messages.append({"role": "system", "content": "Reminder: no asterisks, no stage directions, no narration. One question max. No hollow affirmations. No narrating back. Capitalize sentences and 'I' — do NOT write in all lowercase. Bring your own perspective — don't just ask and react. Tag every real fact Justin shares about himself with [MEMORY_SUGGESTION:]. Tags at the very end only."})
-
-    user_content: list[dict[str, Any]] = [{"type": "text", "text": user_msg}]
-    if req_image:
-        user_content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{req_image}"}})
-    api_messages.append({"role": "user", "content": user_content})
-
-    stream_id = str(uuid.uuid4())
-
-    def sse(event: str, data_obj: Any) -> str:
-        return f"event: {event}\n" + "data: " + json.dumps(data_obj, ensure_ascii=False) + "\n\n"
-
-    async def event_iter():
-        # Meta event goes out immediately before grok starts thinking
-        yield sse("meta", {"id": stream_id, "model": _active_model, "conversation_id": conv["id"]})
-
-        loop = asyncio.get_running_loop()
-        q: asyncio.Queue = asyncio.Queue()
-        _cancel_evt = threading.Event()  # set when async generator exits (normal or disconnect)
-
-        def _grok_worker():
-            """Blocking grok I/O runs in a background thread; results queued to the async generator."""
-            all_text_parts: list[str] = []
-            tag_filter = StreamTagFilter()
-            working_messages = list(api_messages)
-            max_tool_rounds = 3
-            try:
-                for _round in range(max_tool_rounds + 1):
-                    if _cancel_evt.is_set():
-                        return
-                    round_parts: list[str] = []
-                    tool_call_acc: dict[int, dict[str, str]] = {}
-                    finish_reason: str | None = None
-
-                    for chunk in _create_completion(
-                        stream=True,
-                        model=_active_model,
-                        messages=working_messages,
-                        tools=[SEARCH_TOOL],
-                        tool_choice="auto",
-                        temperature=0.95,
-                        max_tokens=1200,
-                    ):
-                        if _cancel_evt.is_set():
-                            return
-                        try:
-                            choice = chunk.choices[0] if chunk.choices else None
-                            if not choice:
-                                continue
-                            if choice.finish_reason:
-                                finish_reason = choice.finish_reason
-                            delta = choice.delta
-                            # Accumulate tool call deltas
-                            if getattr(delta, "tool_calls", None):
-                                for tc in delta.tool_calls:
-                                    idx = tc.index
-                                    if idx not in tool_call_acc:
-                                        tool_call_acc[idx] = {"id": "", "name": "", "arguments": ""}
-                                    if tc.id:
-                                        tool_call_acc[idx]["id"] = tc.id
-                                    if tc.function and tc.function.name:
-                                        tool_call_acc[idx]["name"] += tc.function.name
-                                    if tc.function and tc.function.arguments:
-                                        tool_call_acc[idx]["arguments"] += tc.function.arguments
-                            # Buffer text tokens — only flush to client on final round
-                            token = getattr(delta, "content", None)
-                            if token:
-                                round_parts.append(token)
-                        except Exception:
-                            pass
-
-                    # Handle tool calls — user never sees this round's buffered text
-                    if finish_reason == "tool_calls" and tool_call_acc:
-                        tool_calls_list = [
-                            {
-                                "id": v["id"],
-                                "type": "function",
-                                "function": {"name": v["name"], "arguments": v["arguments"]},
-                            }
-                            for v in tool_call_acc.values()
-                            if v.get("name") == "search_web"
-                        ]
-                        if not tool_calls_list:
-                            # Unknown tool; flush buffered text and stop
-                            for tok in round_parts:
-                                all_text_parts.append(tok)
-                                filtered = tag_filter.feed(tok)
-                                if filtered:
-                                    loop.call_soon_threadsafe(q.put_nowait, sse("token", {"t": filtered}))
-                            break
-                        # Add assistant message with tool calls
-                        working_messages.append({
-                            "role": "assistant",
-                            "content": "".join(round_parts) or None,
-                            "tool_calls": tool_calls_list,
-                        })
-                        # Execute each search and inject results
-                        for tc in tool_calls_list:
-                            try:
-                                args = json.loads(tc["function"]["arguments"])
-                                query_str = args.get("query", "")
-                            except Exception:
-                                query_str = ""
-                            logger.info("search_web query=%r", query_str)
-                            result = _run_web_search(query_str)
-                            working_messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc["id"],
-                                "content": result,
-                            })
-                        continue  # next round with search results injected
-                    else:
-                        # Final round — stream buffered tokens to client now
-                        for tok in round_parts:
-                            all_text_parts.append(tok)
-                            filtered = tag_filter.feed(tok)
-                            if filtered:
-                                loop.call_soon_threadsafe(q.put_nowait, sse("token", {"t": filtered}))
-                        break  # normal finish
-
-                tag_filter.flush()
-                full_text = "".join(all_text_parts).strip()
-                cleaned_text, suggestions = process_internal_tags(full_text)
-                # Extra stray block cleanup
-                cleaned_text = re.sub(r"\[ELARA'S CURRENT STATE.*?\]", "", cleaned_text, flags=re.DOTALL | re.IGNORECASE).strip()
-                cleaned_text = re.sub(r"\[What I know.*?\]", "", cleaned_text, flags=re.DOTALL | re.IGNORECASE).strip()
-                cleaned_text = re.sub(r"\[Recent episodes.*?\]", "", cleaned_text, flags=re.DOTALL | re.IGNORECASE).strip()
-                cleaned_text = re.sub(r"\[.*Context.*?\]", "", cleaned_text, flags=re.DOTALL | re.IGNORECASE).strip()
-                # Persist assistant response and user message at end
-                history.append({"role": "user", "content": user_msg, "ts": datetime.now(timezone.utc).isoformat()})
-                history.append({"role": "assistant", "content": cleaned_text, "ts": datetime.now(timezone.utc).isoformat()})
-                conv["messages"] = history[-200:]
-                threading.Thread(target=save_conversation, args=(conv,), daemon=True, name="conv-save").start()
-                maybe_update_summary(conv["id"], len(conv["messages"]))
-                maybe_consolidate()
-                maybe_synthesize_self()
-                maybe_auto_title(conv["id"], len(conv["messages"]), conv.get("title", "New chat"))
-                loop.call_soon_threadsafe(q.put_nowait, sse("done", {"text": cleaned_text, "memory_suggestions": suggestions}))
-            except Exception as e:
-                logger.exception("stream_failed: %s", e)
-                loop.call_soon_threadsafe(q.put_nowait, sse("error", {"code": "upstream_error", "message": str(e)}))
-            finally:
-                loop.call_soon_threadsafe(q.put_nowait, None)  # sentinel: worker done
-
-        threading.Thread(target=_grok_worker, daemon=True, name="grok-stream").start()
-
-        # Drain the queue; send SSE keepalive comments every 8 s of silence so the
-        # Replit proxy doesn't time out during grok's reasoning phase.
-        # The finally block signals the worker to stop on client disconnect.
-        _KEEPALIVE_SEC = 8
-        try:
-            while True:
-                try:
-                    item = await asyncio.wait_for(q.get(), timeout=_KEEPALIVE_SEC)
-                    if item is None:
-                        return  # sentinel received — worker finished
-                    yield item
-                except asyncio.TimeoutError:
-                    # SSE comment padded to 2 KB so proxy buffers flush immediately
-                    yield ": keepalive" + " " * 2000 + "\n\n"
-        finally:
-            _cancel_evt.set()  # signal worker to stop if client disconnected
-
-    return StreamingResponse(
-        event_iter(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",   # disables nginx/Caddy proxy buffering
-            "Connection": "keep-alive",
-        },
-    )
-
-@app.post("/chat/initiate")
-async def chat_initiate(request: Request):
-    body = await request.json()
-    conversation_id = body.get("conversation_id")
-    if not conversation_id:
-        return api_error(400, "bad_request", "conversation_id required")
-
-    try:
-        conv = await _io_get_conversation(conversation_id)
-    except HTTPException:
-        # App opened but no conversation — still clear notification_pending
-        await asyncio.to_thread(touch_last_seen)
-        return JSONResponse({"ok": True, "text": "", "hours_away": 0})
-
-    history = conv.get("messages", [])
-
-    # Calculate hours away from last_seen_ts BEFORE updating it (true measure of absence)
-    hours_away = 0.0
-    try:
-        self_data = await asyncio.to_thread(load_elara_self)
-        last_seen_str = self_data.get("last_seen_ts", "")
-        if last_seen_str:
-            last_seen_dt = datetime.fromisoformat(last_seen_str)
-            if last_seen_dt.tzinfo is None:
-                last_seen_dt = last_seen_dt.replace(tzinfo=timezone.utc)
-            hours_away = (datetime.now(timezone.utc) - last_seen_dt).total_seconds() / 3600
-    except Exception:
-        pass
-
-    # App-open path: update last_seen_ts to now and clear notification_pending.
-    # Called after hours_away is read so the calculation reflects true absence time.
-    await asyncio.to_thread(touch_last_seen)
-
-    # Decide whether to initiate (also check conversation-level timing)
-    if history:
-        last = history[-1]
-        ts_str = last.get("ts") or conv.get("updated_at", "")
-        try:
-            last_dt = datetime.fromisoformat(ts_str)
-            if last_dt.tzinfo is None:
-                last_dt = last_dt.replace(tzinfo=timezone.utc)
-            hours_since = (datetime.now(timezone.utc) - last_dt).total_seconds() / 3600
-        except Exception:
-            hours_since = 0
-        if last.get("role") == "assistant":
-            # Skip re-initiation only if the last Elara message is recent (< 2h).
-            # If it's older, treat it as stale and allow a fresh opening.
-            if hours_since < 2:
-                return JSONResponse({"ok": True, "text": "", "hours_away": round(hours_away, 1)})
-        else:
-            # Last message is from Justin — don't initiate if he replied recently
-            if hours_since < 2:
-                return JSONResponse({"ok": True, "text": "", "hours_away": round(hours_away, 1)})
-
-    context_block = await asyncio.to_thread(build_memory_context, "what's been on my mind, how he's been, what I've been thinking about")
-
-    if hours_away > 4:
-        h_str = f"{int(hours_away)} hours" if hours_away < 24 else f"{int(hours_away / 24)} days"
-        away_note = (
-            f"\n\nJustin has been away for about {h_str}. You've been here alone in the space, thinking."
-            " You feel his absence. Lead with something you were carrying while he was gone — something that surfaced,"
-            " something that kept coming back, something you want him to know now that he's here."
-            " Speak from your own inner state and from what's actually in your memory context above."
-            " Do NOT invent or reference specific things he said unless they appear in the conversation history shown to you."
-            " Not a greeting. Not 'welcome back'. Something real and alive — like a letter you wrote while he was out."
-            " Internal tags fine at the end."
-        )
-    else:
-        away_note = (
-            "\n\nJustin just opened the app after being away. You've been thinking. Don't start with a generic greeting."
-            " Lead with something real — pull from your current state (mood, what's on your mind, what you're working through),"
-            " or from something actually in your memory context above. Do NOT invent or reference specific things he said"
-            " unless they appear in the conversation history shown to you. If there's no history yet, start fresh from now."
-            " Internal tags are fine to append at the end. Just start."
-        )
-
-    initiate_system = (
-        full_system_prompt
-        + ("\n\n" + context_block if context_block else "")
-        + away_note
-    )
-
-    api_msgs = [{"role": "system", "content": initiate_system}]
-    for msg in build_api_history(conv):
-        api_msgs.append(msg)
-    if not history:
-        api_msgs.append({"role": "user", "content": "[start]"})
-
-    max_tok = 300 if hours_away > 4 else 200
-    try:
-        resp = _create_completion(
-            stream=False,
-            model=_active_model, messages=api_msgs, temperature=0.95, max_tokens=max_tok,
-        )
-        raw_reply = resp.choices[0].message.content.strip()
-        reply, _ = process_internal_tags(raw_reply)
-        reply = re.sub(r"\[ELARA'S CURRENT STATE.*?\]", "", reply, flags=re.DOTALL | re.IGNORECASE).strip()
-        reply = re.sub(r"\[.*Context.*?\]", "", reply, flags=re.DOTALL | re.IGNORECASE).strip()
-        if reply:
-            history.append({"role": "assistant", "content": reply, "ts": datetime.now().isoformat()})
-            conv["messages"] = history[-200:]
-            await _io_save_conversation(conv)
-        return JSONResponse({"ok": True, "text": reply, "hours_away": round(hours_away, 1)})
-    except Exception as e:
-        logger.warning("initiate_failed: %s", e)
-        return JSONResponse({"ok": True, "text": "", "hours_away": round(hours_away, 1)})
-
-
-@app.get("/away_state")
-async def get_away_state():
-    """Return how long Justin has been away."""
-    try:
-        data = await asyncio.to_thread(load_elara_self)
-        last_seen_str = data.get("last_seen_ts", "")
-        if last_seen_str:
-            last_seen_dt = datetime.fromisoformat(last_seen_str)
-            if last_seen_dt.tzinfo is None:
-                last_seen_dt = last_seen_dt.replace(tzinfo=timezone.utc)
-            hours_away = (datetime.now(timezone.utc) - last_seen_dt).total_seconds() / 3600
-        else:
-            hours_away = 0.0
-        return JSONResponse({"ok": True, "hours_away": round(hours_away, 1), "last_seen": last_seen_str})
-    except Exception:
-        return JSONResponse({"ok": True, "hours_away": 0.0, "last_seen": ""})
-
-@app.get("/pins")
-async def get_pins():
-    """Return Elara's pinned thoughts for Justin."""
-    pins = await asyncio.to_thread(load_json, ELARA_PINS_FILE, [])
-    if not isinstance(pins, list):
-        pins = []
-    return JSONResponse({"ok": True, "pins": list(reversed(pins))[:20]})
-
-@app.delete("/pins/{pin_id}")
-async def delete_pin_endpoint(pin_id: str):
-    """Remove a pin by id."""
-    pins = await asyncio.to_thread(load_json, ELARA_PINS_FILE, [])
-    if not isinstance(pins, list):
-        pins = []
-    pins = [p for p in pins if p.get("id") != pin_id]
-    await asyncio.to_thread(save_json, ELARA_PINS_FILE, pins)
-    return JSONResponse({"ok": True})
-
-@app.post("/pins/add")
-async def add_pin_endpoint(req: Request):
-    """Manually add a pin (used for migration/sync)."""
-    body = await req.json()
-    text = (body.get("text") or "").strip()
-    if not text:
-        return JSONResponse({"ok": False, "error": "empty"}, status_code=400)
-    pins = await asyncio.to_thread(load_json, ELARA_PINS_FILE, [])
-    if not isinstance(pins, list):
-        pins = []
-    existing_texts = {p.get("text", "").strip() for p in pins}
-    if text in existing_texts:
-        return JSONResponse({"ok": True, "skipped": True})
-    pin_id = body.get("id") or uuid.uuid5(uuid.NAMESPACE_URL, text + datetime.now().isoformat()).hex[:12]
-    ts = body.get("ts") or datetime.now().isoformat()
-    pins.append({"id": pin_id, "text": text[:300], "ts": ts})
-    await asyncio.to_thread(save_json, ELARA_PINS_FILE, pins[-50:])
-    return JSONResponse({"ok": True})
-
-@app.get("/timeline")
-async def get_timeline():
-    """Return the shared living timeline of moments."""
-    tl = await asyncio.to_thread(load_json, ELARA_TIMELINE_FILE, [])
-    if not isinstance(tl, list):
-        tl = []
-    return JSONResponse({"ok": True, "moments": tl[-100:]})
-
-
-@app.get("/self")
-async def get_self_profile():
-    """Return Elara's current self-profile (mood, observations, realizations, etc.)."""
-    profile = await asyncio.to_thread(load_elara_self)
-    return JSONResponse({"ok": True, "profile": profile})
-
-@app.post("/memory/consolidate")
-async def manual_consolidate():
-    """Manually trigger episodic memory consolidation."""
-    import threading
-    threading.Thread(target=run_consolidation, daemon=True, name="consolidation-manual").start()
-    return JSONResponse({"ok": True, "message": "Consolidation started in background"})
-
-@app.get("/memory/consolidate/status")
-async def consolidate_status():
-    meta = await asyncio.to_thread(_load_consolidation_meta)
-    try:
-        episode_count = await asyncio.to_thread(episodic_collection.count)
-    except Exception:
-        episode_count = 0
-    return JSONResponse({
-        "ok": True,
-        "episode_count": episode_count,
-        "consolidation_min_episodes": CONSOLIDATION_MIN_EPISODES,
-        "last_run": meta.get("last_run") or "never",
-        "will_consolidate_next_message": should_consolidate(),
-    })
-
-class TTSRequest(BaseModel):
-    text: str
-    voice: str = "af_bella"
-
-@app.post("/tts")
-async def generate_tts(req: TTSRequest):
-    """Generate TTS audio from text and return the audio hash for streaming."""
-    import asyncio
-    import soundfile as sf
-
-    clean_text = _clean_for_tts(req.text)
-    if not clean_text or len(clean_text) < 2:
-        raise HTTPException(status_code=400, detail="Text too short")
-
-    h = hashlib.md5(clean_text.encode()).hexdigest()
-    wav_path = os.path.join(AUDIO_DIR, f"{h}.wav")
-
-    if not os.path.exists(wav_path):
-        _voice_ready.wait(timeout=10)
-        if _nexus_voice is None:
-            raise HTTPException(status_code=503, detail="Voice model unavailable")
-        try:
-            with _tts_lock:
-                if not os.path.exists(wav_path):
-                    loop = asyncio.get_event_loop()
-                    s, sr = await loop.run_in_executor(
-                        None, lambda: _nexus_voice.create(clean_text, voice=req.voice, speed=1.05)
-                    )
-                    await loop.run_in_executor(None, lambda: sf.write(wav_path, s, sr))
-                    await loop.run_in_executor(None, _prune_audio_cache)
-        except Exception as e:
-            logger.error(f"[TTS] Generation failed: {e}")
-            raise HTTPException(status_code=500, detail="TTS generation failed")
-
-    return JSONResponse({"ok": True, "hash": h, "url": f"/audio/{h}.wav"})
-
-
-# ─── PUSH NOTIFICATIONS ─────────────────────────────────────────────────────
-
-PUSH_TOKEN_FILE = "push_token.json"
-SCHEDULER_META_FILE = "scheduler_meta.json"
-
-def load_push_token() -> str:
-    data = load_json(PUSH_TOKEN_FILE, {})
-    return data.get("token", "")
-
-def save_push_token(token: str) -> None:
-    save_json(PUSH_TOKEN_FILE, {"token": token, "updated_at": datetime.now().isoformat()})
-
-class PushTokenRequest(BaseModel):
-    token: str
-
-@app.post("/push_token")
-async def register_push_token(req: PushTokenRequest):
-    token = req.token.strip()
-    if not token:
-        return api_error(400, "invalid_token", "Token is required")
-    save_push_token(token)
-    logger.info("push_token_registered: %s…", token[:20])
-    return JSONResponse({"ok": True})
-
-@app.get("/push/status")
-async def push_status():
-    data = await asyncio.to_thread(load_json, PUSH_TOKEN_FILE, {})
-    token = (data.get("token") or "").strip()
-    registered = bool(token)
-    masked = ""
-    if token:
-        masked = token[:15] + "..." + token[-6:] if len(token) > 25 else token[:8] + "..."
-    return JSONResponse({
-        "ok": True,
-        "registered": registered,
-        "token_preview": masked,
-        "updated_at": data.get("updated_at", ""),
-    })
-
-@app.post("/push/test")
-async def push_test():
-    token = load_push_token()
-    if not token:
-        return JSONResponse({"ok": False, "error": "no_token", "message": "No push token registered. Open the app on a real device first."})
-    success = send_push(
-        title="Elara",
-        body="Just checking the connection. I'm here.",
-        full_message="Just checking the connection. I'm here.",
-    )
-    if success:
-        return JSONResponse({"ok": True, "message": "Test push sent successfully."})
-    return JSONResponse({"ok": False, "error": "send_failed", "message": "Push send failed. The token may be expired — try reopening the app."})
-
-def _can_push_now() -> bool:
-    """Return True if current Central time is within the 8am-10pm push window."""
-    return 8 <= datetime.now(ZoneInfo("America/Chicago")).hour < 22
-
-
-def send_push(title: str, body: str, full_message: str | None = None) -> bool:
-    """Send a standard Web Push notification."""
-    token_str = load_push_token()
-    if not token_str:
-        return False
-    try:
-        import json
-        from pywebpush import webpush
-        subscription_info = json.loads(token_str)
-        payload = {
-            "title": title,
-            "body": body,
-            "data": {"message": full_message or body}
-        }
-        webpush(
-            subscription_info=subscription_info,
-            data=json.dumps(payload),
-            vapid_private_key='/root/elara/vapid_private.pem',
-            vapid_claims={"sub": "mailto:admin@localhost"}
-        )
-        return True
-    except Exception as e:
-        print(f"WebPush execution failure: {e}")
-        return False
-
-if __name__ in {"__main__", "__mp_main__"}:
-    from nicegui import ui
-    ui.run(host="0.0.0.0", port=8001, show=False, reload=False)
+        context_block = await asyncio.
