@@ -1152,4 +1152,4 @@ async def generate_tts(req: TTSRequest):
     return JSONResponse({"ok": True, "hash": h, "url": f"/audio/{h}.wav"})
 
 if __name__ == "__main__":
-    ui.run(host="0.0.0.0", port=int(os.getenv("BRAIN_PORT", "8001")))
+        ui.run(host="0.0.0.0", port=int(os.getenv("BRAIN_PORT", "8001")))
