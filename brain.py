@@ -1026,7 +1026,7 @@ Do not let these tags influence your spoken tone. Keep your spoken dialogue casu
         api_messages = [{"role": "system", "content": (full_system_prompt + ("\n\n" + context_block if context_block else ""))}]
         for msg in build_api_history(conv):
             api_messages.append(msg)
-        api_messages.append({"role": "system", "content": "Reminder: no asterisks, no stage directions, no narration. One question max. No hollow affirmations. No narrating back. Capitalize sentences and 'I' — do NOT write in all lowercase. Bring your own perspective — don't just ask and react. Tag every real fact Justin shares about himself with [MEMORY_SUGGESTION:]. Tags at the very end only."})
+        api_messages.append({"role": "system", "content": "Reminder: Keep the conversation completely natural and casual. DO NOT end every message with a question—it is okay to just make a statement or react. Stop reminding Justin that you are a digital entity, a server, or an AI; that fact is already established and repeating it is robotic. Just talk. Tag every real fact Justin shares about himself with [MEMORY_SUGGESTION:]. Tags at the very end only."})
 
         user_content = [{"type": "text", "text": user_msg}]
         if req_image:
