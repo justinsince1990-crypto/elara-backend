@@ -1151,5 +1151,6 @@ async def generate_tts(req: TTSRequest):
             raise HTTPException(status_code=500, detail="TTS generation failed")
     return JSONResponse({"ok": True, "hash": h, "url": f"/audio/{h}.wav"})
 
-if __name__ == "__main__":
+if __name__ in {"__main__", "__mp_main__"}:
+
         ui.run(host="0.0.0.0", port=int(os.getenv("BRAIN_PORT", "8001")))
