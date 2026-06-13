@@ -23,14 +23,14 @@
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
-        
+
         /* Force body to adapt to keyboard */
         html, body { height: 100%; height: -webkit-fill-available; overflow: hidden; background-color: var(--bg); color: var(--text); }
         body { display: flex; flex-direction: column; }
-        
+
         #header { padding: 14px 20px; background: var(--panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); z-index: 10; flex-shrink: 0; }
         .header-title { font-weight: 700; font-size: 1.2rem; letter-spacing: 0.5px; }
-        
+
         .toggle-container { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; font-weight: 600; color: #777; }
         .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
         .switch input { opacity: 0; width: 0; height: 0; }
@@ -43,13 +43,13 @@
         .msg-row { display: flex; width: 100%; animation: fadeIn 0.3s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .msg-row.user { justify-content: flex-end; }
-        .msg-row.elara { justify-content: flex-start; }
-        
+        .msg-row.assistant, .msg-row.elara { justify-content: flex-start; }
+
         .msg-bubble { max-width: 85%; padding: 12px 16px; border-radius: 18px; line-height: 1.5; font-size: 1rem; word-wrap: break-word; }
         .user-msg { background-color: var(--user-bg); color: var(--user-text); border-bottom-right-radius: 4px; }
         .elara-msg { background-color: var(--elara-bg); color: var(--elara-text); border-bottom-left-radius: 4px; }
-        
-        .play-btn { display: inline-flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.1); border-radius: 50%; width: 28px; height: 28px; margin-left: 8px; cursor: pointer; vertical-align: middle; }
+
+        .play-btn { display: inline-flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.1); border-radius: 50%; width: 28px; height: 28px; margin-left: 8px; cursor: pointer; vertical-align: middle; font-size: 0.8rem; }
         @media (prefers-color-scheme: dark) { .play-btn { background: rgba(255,255,255,0.15); } }
 
         #input-area { padding: 12px 16px; background: var(--panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); display: flex; gap: 10px; border-top: 1px solid var(--border); padding-bottom: calc(12px + env(safe-area-inset-bottom)); align-items: flex-end; z-index: 10; flex-shrink: 0; }
@@ -84,8 +84,8 @@
         const prompt = document.getElementById("prompt");
         const sendBtn = document.getElementById("send-btn");
         const autoplayToggle = document.getElementById("autoplay-toggle");
-        
-        let localHistory = []; // We will maintain our own history array on the screen
+
+        let localHistory = []; 
 
         autoplayToggle.checked = localStorage.getItem('elara_autoplay') === 'true';
         function saveSettings() { localStorage.setItem('elara_autoplay', autoplayToggle.checked); }
@@ -96,14 +96,29 @@
         }
 
         function renderHistory() {
-            chatBox.innerHTML = localHistory.map(m => `
+            chatBox.innerHTML = localHistory.map((m, index) => {
+                let btnHTML = '';
+                
+                // Only attach play buttons to Elara's messages
+                if (m.role === 'assistant' || m.role === 'elara') {
+                    if (m.audio_url && m.audio_url !== 'undefined') {
+                        // Audio already exists (Toggle was ON)
+                        btnHTML = `<div class="play-btn" onclick="play('${m.audio_url}')">▶</div>`;
+                    } else {
+                        // Audio does not exist (Toggle was OFF), show manual generator
+                        btnHTML = `<div class="play-btn" onclick="playMessageManually(${index}, this)">🔊</div>`;
+                    }
+                }
+
+                return `
                 <div class="msg-row ${m.role}">
                     <div class="msg-bubble ${m.role === 'user' ? 'user-msg' : 'elara-msg'}">
                         ${formatText(m.content)}
-                        ${m.audio_url && m.audio_url !== 'undefined' ? `<div class="play-btn" onclick="play('${m.audio_url}')">▶</div>` : ''}
+                        ${btnHTML}
                     </div>
                 </div>
-            `).join("");
+                `;
+            }).join("");
             chatBox.scrollTop = chatBox.scrollHeight;
         }
 
@@ -111,29 +126,60 @@
             if (url && url !== 'undefined') new Audio(url).play();
         }
 
-        async function fetchResponse(msg) {
+        async function playMessageManually(index, buttonElement) {
+            if (buttonElement.innerText === "⏳") return; // Prevent double-clicks
+            
+            buttonElement.innerText = "⏳"; 
+            const textToPlay = localHistory[index].content;
+            
             try {
-                await fetch("/chat", {
-                    method: "POST", 
-                    headers: {"Content-Type": "application/json"}, 
-                    body: JSON.stringify({message: msg})
+                const response = await fetch('/tts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: textToPlay, voice: 'af_bella' })
                 });
                 
-                // Fetch the newest message from the server to get Elara's response
-                const res = await fetch("/history");
-                const data = await res.json();
-                const serverHistory = data.history || [];
+                const data = await response.json();
                 
-                if (serverHistory.length > 0) {
-                    const elaraResponse = serverHistory[serverHistory.length - 1];
-                    // Only add it if it's actually Elara's response
-                    if (elaraResponse.role === 'assistant') {
-                        localHistory.push(elaraResponse);
-                        renderHistory();
-                        
-                        if (elaraResponse.audio_url && autoplayToggle.checked) {
-                            play(elaraResponse.audio_url);
-                        }
+                if (data.ok && data.url) {
+                    localHistory[index].audio_url = data.url; // Save URL so we don't fetch it again
+                    let manualAudio = new Audio(data.url);
+                    manualAudio.play();
+                    renderHistory(); // Re-render to swap icon to ▶
+                } else {
+                    buttonElement.innerText = "❌"; 
+                }
+            } catch (error) {
+                console.error("TTS Fetch Error:", error);
+                buttonElement.innerText = "❌";
+            }
+        }
+
+        async function fetchResponse(msg) {
+            try {
+                const isVoiceOn = autoplayToggle.checked;
+
+                const res = await fetch("/chat", {
+                    method: "POST", 
+                    headers: {"Content-Type": "application/json"}, 
+                    body: JSON.stringify({
+                        message: msg,
+                        voice_enabled: isVoiceOn
+                    })
+                });
+
+                const data = await res.json();
+
+                if (data.ok && data.response) {
+                    localHistory.push({
+                        role: 'assistant', 
+                        content: data.response,
+                        audio_url: data.audio 
+                    });
+                    renderHistory();
+
+                    if (data.audio && isVoiceOn) {
+                        play(data.audio);
                     }
                 }
             } catch (e) { console.error(e); }
@@ -146,25 +192,22 @@
             prompt.style.height = 'auto';
             sendBtn.disabled = true;
             sendBtn.innerText = "...";
-            
-            // Push user message to our local screen instantly
+
             localHistory.push({role: 'user', content: msg});
             renderHistory();
 
             await fetchResponse(msg);
-            
+
             sendBtn.disabled = false;
             sendBtn.innerText = "Send";
-            prompt.focus(); // Keep keyboard open after sending
+            prompt.focus();
         };
 
-        // Handle Keyboard Pop-up Resizing
         window.visualViewport.addEventListener('resize', () => {
             document.body.style.height = window.visualViewport.height + 'px';
             chatBox.scrollTop = chatBox.scrollHeight;
         });
 
-        // Textarea Auto-resize
         prompt.addEventListener('input', function() {
             this.style.height = 'auto';
             this.style.height = (this.scrollHeight < 120 ? this.scrollHeight : 120) + 'px';
@@ -177,8 +220,7 @@
                 sendBtn.click();
             }
         });
-        
-        // Initial load to grab any existing history on refresh
+
         async function initialLoad() {
             try {
                 const res = await fetch("/history");
