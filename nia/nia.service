@@ -1,0 +1,15 @@
+[Unit]
+Description=Nia Brain — The Way Spiritual Guide
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/elara
+ExecStart=/root/elara/venv/bin/python nia/nia_main.py
+Restart=always
+RestartSec=5
+EnvironmentFile=/root/elara/.env
+
+[Install]
+WantedBy=multi-user.target
